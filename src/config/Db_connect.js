@@ -6,9 +6,9 @@ const db_connection = async () => {
     const mongoURI = `mongodb+srv://${process.env.DB_USER}:${encodeURIComponent(process.env.DB_PASS)}@${process.env.DB_HOST}/?retryWrites=true&w=majority&appName=Cluster0`;
     
     await mongoose.connect(mongoURI);
-    console.log('✅ MongoDB connected successfully...');
+    console.log('MongoDB connected successfully...');
   } catch (err) {
-    console.error('❌ MongoDB connection error:', err.message);
+    console.error('MongoDB connection error:', err.message);
     process.exit(1);
   }
 };

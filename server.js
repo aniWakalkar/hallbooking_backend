@@ -3,16 +3,13 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db_connection = require('./config/Db_connect');
-const verifyAdmin = require('./middleware/Auth');
+const db_connection = require('./src/config/Db_connect');
+const { verifyAdmin, verifytoken } = require('./src/middleware/Auth');
 
-require('./models/User');
-require('./models/Hall');
-require('./models/Booking');
-
-const User = require('./models/User');
-const Hall = require('./models/Hall');
-const Booking = require('./models/Booking');
+const User = require('./src/models/User');
+const Hall = require('./src/models/Hall');
+const Staff = require('./src/models/Staff');
+const Booking = require('./src/models/Booking');
 
 const app = express();
 
@@ -21,32 +18,17 @@ app.use(express.json());
 
 db_connection();
 
-const verifytoken = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).send({ message: 'No token provided' });
 
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    req.user = await User.findById(decoded.id);
-    if (!req.user) return res.status(404).send({ message: 'User not found' });
-    next();
-  } catch (err) {
-    return res.status(401).send({ message: 'Invalid token' });
-  }
-};
-
-
+// --------------------------- PUBLIC ENDPOINTS --------------------------------------------------
 
 // Test
-app.get('/', (req, res) => {
+app.get('/healthy', (req, res) => {
   res.send('Hello, World!');
 });
 
 // Register
 app.post('/api/auth/register', async (req, res) => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password, role } = req.body; // role is for testing purpose only
 
   if (!name || !email || !password || !role ) {
     return res.status(400).send({ message: 'Please fill all fields' });
@@ -61,7 +43,7 @@ app.post('/api/auth/register', async (req, res) => {
       name,
       email,
       password: hashedPassword,
-      role: role || 'user' // default to user
+      role: role || 'user' // default to user 
     });
 
     const newUser = await user.save();
@@ -102,6 +84,10 @@ app.get('/api/halls', async (req, res) => {
   }
 });
 
+
+// --------------------------- ADMIN ONLY --------------------------------------------------
+
+
 // Create a hall (admin only)
 app.post('/api/halls', verifyAdmin, async (req, res) => {
   const { name, location, capacity, pricePerHour } = req.body;
@@ -118,24 +104,6 @@ app.post('/api/halls', verifyAdmin, async (req, res) => {
     await newHall.save();
 
     res.status(201).send({ message: 'Hall created successfully', HallId: newHall._id });
-  } catch (err) {
-    res.status(400).send({ message: err.message });
-  }
-});
-
-// Create booking
-app.post('/api/bookings', async (req, res) => {
-  const { hallId, userId, date, startTime, endTime, status } = req.body;
-
-  if (!hallId || !userId || !date || !startTime || !endTime || !status) {
-    return res.status(400).send({ message: 'Please fill all fields' });
-  }
-
-  try {
-    const booking = new Booking({ hallId, userId, date, startTime, endTime, status });
-    await booking.save();
-
-    res.status(201).send({ message: 'Booking created successfully', bookingId: booking._id });
   } catch (err) {
     res.status(400).send({ message: err.message });
   }
@@ -180,6 +148,65 @@ app.put('/api/bookings/:id', verifyAdmin, async (req, res) => {
   }
 });
 
+// Cancel a booking (admin only)
+app.delete('/api/bookings/:id', verifyAdmin, async (req, res) => {
+  try {
+    const deletedBooking = await Booking.findByIdAndDelete(req.params.id);
+
+    if (!deletedBooking) return res.status(404).send({ message: 'Booking not found' });
+
+    res.status(200).send({ message: 'Booking canceled successfully', deletedBooking });
+  } catch (err) {
+    res.status(400).send({ message: err.message });
+  }
+});
+
+// // ------------------------ STAFF ENDPOINTS -----------------------------------------
+
+// Create a Staff (admin only)
+app.post('/api/staff', verifyAdmin, async (req, res) => {
+  const { name, hallToServe, contactInfo, pricePerHour  } = req.body;
+
+  if (!name || !hallToServe || !contactInfo || !pricePerHour) {
+    return res.status(400).send({ message: 'Please fill all fields' });
+  }
+
+  try {
+    const oldStaff = await Staff.findOne({ name });
+    if (oldStaff) return res.status(409).send({ message: 'Staff already exists' });
+
+    const newStaff = new Staff({ name, hallToServe, contactInfo, pricePerHour });
+    await newStaff.save();
+
+    res.status(201).send({ message: 'Staff created successfully', StaffId: newStaff._id });
+    // res.status(201).send({ message: 'Staff created successfully' });
+  } catch (err) {
+    res.status(400).send({ message: err.message });
+  }
+});
+
+// --------------------------- USERS ONLY --------------------------------------------------
+
+// Create booking
+app.post('/api/bookings', verifytoken, async (req, res) => {
+  const { hallId, date, startTime, endTime, status } = req.body;
+  
+  if (!hallId || !date || !startTime || !endTime || !status) {
+    return res.status(400).send({ message: 'Please fill all fields' });
+  }
+
+  const userId = req.user._id 
+  
+  try {
+    const booking = new Booking({ hallId, userId, date, startTime, endTime, status });
+    await booking.save();
+
+    res.status(201).send({ message: 'Booking created successfully', bookingId: booking._id });
+  } catch (err) {
+    res.status(400).send({ message: err.message });
+  }
+});
+
 // Get my bookings (logged-in user)
 app.get('/api/bookings/my', verifytoken, async (req, res) => {
   try {
@@ -193,20 +220,9 @@ app.get('/api/bookings/my', verifytoken, async (req, res) => {
   }
 });
 
-// Cancel a booking (admin only)
-app.delete('/api/bookings/:id', async (req, res) => {
-  try {
-    const deletedBooking = await Booking.findByIdAndDelete(req.params.id);
-
-    if (!deletedBooking) return res.status(404).send({ message: 'Booking not found' });
-
-    res.status(200).send({ message: 'Booking canceled successfully', deletedBooking });
-  } catch (err) {
-    res.status(400).send({ message: err.message });
-  }
-});
 
 
+// -----------------------------------------------------------------------------------------
 
 
 const port = process.env.PORT || 3030;
