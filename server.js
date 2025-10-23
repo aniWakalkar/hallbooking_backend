@@ -68,7 +68,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '2h' });
 
-    res.status(200).send({ user_id: user._id, role: user.role,  message: 'Login successful', token });
+    res.status(200).send({ role: user.role,  message: 'Login successful', token });
   } catch (err) {
     res.status(500).send({ message: err.message });
   }
